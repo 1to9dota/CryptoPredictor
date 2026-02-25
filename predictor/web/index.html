@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CryptoPredictor</title>
+<style>
+  :root {
+    --bg: #0f172a; --card: #1e293b; --border: #334155;
+    --text: #e2e8f0; --muted: #94a3b8; --accent: #3b82f6;
+    --green: #22c55e; --red: #ef4444; --yellow: #eab308;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh; }
+  .container { max-width: 960px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 1.5rem; margin-bottom: 20px; }
+  h1 span { color: var(--muted); font-size: 0.85rem; font-weight: normal; margin-left: 12px; }
+
+  /* 统计卡片 */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .stat-label { color: var(--muted); font-size: 0.8rem; margin-bottom: 4px; }
+  .stat-value { font-size: 1.8rem; font-weight: 700; }
+  .stat-sub { color: var(--muted); font-size: 0.75rem; margin-top: 4px; }
+
+  /* 分组统计 */
+  .groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-bottom: 24px; }
+  .group-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; justify-content: space-between; align-items: center; }
+  .group-name { font-size: 0.9rem; font-weight: 600; }
+  .group-rate { font-size: 1.1rem; font-weight: 700; }
+  .group-count { color: var(--muted); font-size: 0.75rem; }
+
+  /* 规则 */
+  .rules-section { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 24px; }
+  .rules-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 10px; color: var(--yellow); }
+  .rule-item { color: var(--muted); font-size: 0.8rem; padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .rule-item:last-child { border-bottom: none; }
+  .no-rules { color: var(--muted); font-size: 0.8rem; font-style: italic; }
+
+  /* 预测列表 */
+  .section-title { font-size: 1rem; font-weight: 600; margin-bottom: 12px; }
+  .pred-list { display: flex; flex-direction: column; gap: 8px; }
+  .pred-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
+    display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; }
+  .pred-dir { font-size: 1.5rem; }
+  .pred-info { min-width: 0; }
+  .pred-coin { font-weight: 600; font-size: 0.95rem; }
+  .pred-coin .tf { color: var(--muted); font-weight: normal; font-size: 0.8rem; margin-left: 6px; }
+  .pred-reason { color: var(--muted); font-size: 0.78rem; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pred-meta { text-align: right; white-space: nowrap; }
+  .pred-price { font-size: 0.85rem; font-weight: 600; }
+  .pred-time { color: var(--muted); font-size: 0.7rem; margin-top: 2px; }
+  .pred-prices { font-size: 0.75rem; color: var(--muted); margin-top: 3px; font-family: monospace; }
+  .pred-result { font-size: 0.75rem; margin-top: 3px; font-weight: 600; }
+
+  .confidence { display: inline-flex; gap: 1px; margin-left: 6px; }
+  .confidence .star { color: var(--yellow); font-size: 0.7rem; }
+  .confidence .star.empty { color: var(--border); }
+
+  .up { color: var(--green); }
+  .down { color: var(--red); }
+  .correct { color: var(--green); }
+  .wrong { color: var(--red); }
+  .pending-result { color: var(--muted); }
+
+  .refresh-info { color: var(--muted); font-size: 0.7rem; text-align: center; margin-top: 16px; }
+
+  @media (max-width: 600px) {
+    .container { padding: 12px; }
+    .pred-card { grid-template-columns: auto 1fr; }
+    .pred-meta { grid-column: 1 / -1; text-align: left; display: flex; gap: 12px; align-items: center; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🔮 CryptoPredictor <span id="refresh-timer"></span></h1>
+
+  <div class="stats" id="stats"></div>
+  <div class="section-title" style="margin-bottom:8px">📊 分项统计</div>
+  <div class="groups" id="groups"></div>
+  <div class="rules-section" id="rules-section" style="display:none">
+    <div class="rules-title">🧠 AI 学习规则</div>
+    <div id="rules"></div>
+  </div>
+  <div class="section-title">📋 预测历史</div>
+  <div class="pred-list" id="predictions"></div>
+  <div class="refresh-info">每 30 秒自动刷新</div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+
+function coinName(c) { return c.includes('BTC') ? 'BTC' : 'ETH'; }
+function stars(n) {
+  return Array.from({length:5}, (_,i) =>
+    `<span class="star ${i < n ? '' : 'empty'}">${i < n ? '★' : '☆'}</span>`
+  ).join('');
+}
+function fmtTime(iso) {
+  if (!iso) return '';
+  return iso.slice(5, 16).replace('T', ' ');
+}
+
+async function load() {
+  try {
+    const [statsRes, predsRes, rulesRes] = await Promise.all([
+      fetch('/api/stats').then(r => r.json()),
+      fetch('/api/predictions?limit=30').then(r => r.json()),
+      fetch('/api/rules').then(r => r.json()),
+    ]);
+
+    // 聚合统计：按币种、按周期
+    const groups = statsRes.groups || [];
+    const byCoin = {}, byTf = {};
+    groups.forEach(g => {
+      const cn = coinName(g.coin);
+      if (!byCoin[cn]) byCoin[cn] = { correct: 0, total: 0 };
+      byCoin[cn].correct += g.correct;
+      byCoin[cn].total += g.total;
+      const tf = g.timeframe.toUpperCase();
+      if (!byTf[tf]) byTf[tf] = { correct: 0, total: 0 };
+      byTf[tf].correct += g.correct;
+      byTf[tf].total += g.total;
+    });
+
+    function rateCard(label, emoji, correct, total) {
+      const rate = total > 0 ? (correct / total * 100).toFixed(1) : '--';
+      const color = rate === '--' ? '' : rate >= 60 ? 'up' : rate >= 50 ? '' : 'down';
+      return `<div class="stat-card">
+        <div class="stat-label">${emoji} ${label}</div>
+        <div class="stat-value ${color}">${rate === '--' ? '--' : rate + '%'}</div>
+        <div class="stat-sub">${correct} / ${total} 预测</div>
+      </div>`;
+    }
+
+    const pendingCount = predsRes.filter(p => !p.validated_at).length;
+    $('#stats').innerHTML =
+      rateCard('总准确率', '🎯', statsRes.correct, statsRes.total) +
+      rateCard('BTC', '₿', (byCoin['BTC']||{}).correct||0, (byCoin['BTC']||{}).total||0) +
+      rateCard('ETH', 'Ξ', (byCoin['ETH']||{}).correct||0, (byCoin['ETH']||{}).total||0) +
+      rateCard('1H 周期', '⏱', (byTf['1H']||{}).correct||0, (byTf['1H']||{}).total||0) +
+      rateCard('4H 周期', '🕓', (byTf['4H']||{}).correct||0, (byTf['4H']||{}).total||0) +
+      `<div class="stat-card">
+        <div class="stat-label">📝 待验证</div>
+        <div class="stat-value">${pendingCount}</div>
+        <div class="stat-sub">共 ${predsRes.length} 条记录</div>
+      </div>`;
+
+    // 细分：每个币种 × 周期
+    if (groups.length > 0) {
+      $('#groups').innerHTML = groups.map(g => {
+        const rate = g.total > 0 ? (g.correct / g.total * 100).toFixed(1) : 0;
+        const color = rate >= 60 ? 'up' : rate >= 50 ? '' : 'down';
+        return `<div class="group-card">
+          <div>
+            <div class="group-name">${coinName(g.coin)} ${g.timeframe.toUpperCase()}</div>
+            <div class="group-count">${g.correct}/${g.total}</div>
+          </div>
+          <div class="group-rate ${color}">${rate}%</div>
+        </div>`;
+      }).join('');
+    }
+
+    // 规则
+    if (rulesRes.rules && rulesRes.rules.length > 0) {
+      $('#rules-section').style.display = 'block';
+      $('#rules').innerHTML = rulesRes.rules.map(r =>
+        `<div class="rule-item">${r}</div>`
+      ).join('');
+    } else {
+      $('#rules-section').style.display = 'none';
+    }
+
+    // 预测列表
+    $('#predictions').innerHTML = predsRes.map(p => {
+      const isUp = p.direction === 'up';
+      const dirEmoji = isUp ? '🟢' : '🔴';
+      const dirText = isUp ? '涨' : '跌';
+
+      let resultHtml = '';
+      let priceDetail = '';
+      if (p.validated_at) {
+        const correct = p.is_correct;
+        const mark = correct ? '✅ 正确' : '❌ 错误';
+        const cls = correct ? 'correct' : 'wrong';
+        const change = p.price_at_validate && p.price_at_predict
+          ? ((p.price_at_validate - p.price_at_predict) / p.price_at_predict * 100).toFixed(2)
+          : null;
+        resultHtml = `<div class="pred-result ${cls}">${mark}${change !== null ? ' (' + (change > 0 ? '+' : '') + change + '%)' : ''}</div>`;
+        const openP = Number(p.price_at_predict).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+        const closeP = Number(p.price_at_validate).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+        const arrow = p.price_at_validate >= p.price_at_predict ? '↗' : '↘';
+        priceDetail = `<div class="pred-prices">$${openP} ${arrow} $${closeP}</div>`;
+      } else {
+        resultHtml = `<div class="pred-result pending-result">⏳ 待验证</div>`;
+      }
+
+      return `<div class="pred-card">
+        <div class="pred-dir">${dirEmoji}</div>
+        <div class="pred-info">
+          <div class="pred-coin">${coinName(p.coin)} <span class="tf">${p.timeframe.toUpperCase()}</span>
+            <span class="confidence">${stars(p.confidence)}</span>
+          </div>
+          <div class="pred-reason">${p.reasoning || ''}</div>
+        </div>
+        <div class="pred-meta">
+          <div class="pred-price">$${Number(p.price_at_predict).toLocaleString()}</div>
+          <div class="pred-time">${fmtTime(p.created_at)}</div>
+          ${priceDetail}
+          ${resultHtml}
+        </div>
+      </div>`;
+    }).join('');
+
+  } catch (e) {
+    console.error('加载失败:', e);
+  }
+}
+
+// 自动刷新
+let countdown = 30;
+function tick() {
+  $('#refresh-timer').textContent = `${countdown}s 后刷新`;
+  countdown--;
+  if (countdown < 0) { countdown = 30; load(); }
+}
+
+load();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
