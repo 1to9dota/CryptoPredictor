@@ -52,6 +52,14 @@ def _build_market_section(market: dict) -> str:
         lines.append(f"- 合约持仓量: {oi['open_interest']:.2f}, 交易量: {oi['volume']:.2f}")
         lines.append("  提示: 持仓量激增+价格不动=大户布局")
 
+    if "hashrate" in market:
+        hr = market["hashrate"]
+        trend = ""
+        if hr.get("change_7d_pct") is not None:
+            trend = f", 7日变化: {hr['change_7d_pct']:+.2f}%"
+        lines.append(f"- BTC算力: {hr['hashrate_ehs']} EH/s{trend}")
+        lines.append("  提示: 算力持续上升=矿工看好后市，算力骤降=矿工投降可能见底")
+
     return "\n".join(lines) if len(lines) > 1 else ""
 
 

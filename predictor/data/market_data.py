@@ -1,4 +1,4 @@
-"""市场情绪数据源 — 资金费率、恐惧贪婪指数、多空比、大户持仓"""
+"""市场情绪数据源 — 资金费率、恐惧贪婪指数、多空比、大户持仓、算力"""
 
 import asyncio
 import logging
@@ -144,22 +144,68 @@ async def fetch_open_interest(coin: str) -> dict | None:
         return None
 
 
+async def fetch_hashrate() -> dict | None:
+    """获取比特币网络算力和难度（mempool.space）
+
+    算力上升 = 矿工看好后市，算力骤降 = 可能矿工投降
+    返回当前算力、难度、以及7天算力变化趋势
+    """
+    url = "https://mempool.space/api/v1/mining/hashrate/1w"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    logger.warning(f"算力 API {resp.status}")
+                    return None
+                result = await resp.json()
+
+        current_hr = float(result.get("currentHashrate", 0))
+        difficulty = float(result.get("currentDifficulty", 0))
+        hashrates = result.get("hashrates", [])
+
+        # 计算7天算力变化率
+        change_7d = None
+        if len(hashrates) >= 2:
+            oldest = float(hashrates[0]["avgHashrate"])
+            latest = float(hashrates[-1]["avgHashrate"])
+            if oldest > 0:
+                change_7d = (latest - oldest) / oldest * 100
+
+        # 换算为 EH/s（更易读）
+        current_ehs = current_hr / 1e18
+
+        return {
+            "hashrate_ehs": round(current_ehs, 2),
+            "difficulty": difficulty,
+            "change_7d_pct": round(change_7d, 2) if change_7d is not None else None,
+        }
+    except Exception as e:
+        logger.warning(f"获取算力失败: {e}")
+        return None
+
+
 async def fetch_market_data(coin: str, timeframe: str) -> dict:
     """并行获取所有市场情绪数据，任一失败不影响其他
 
     Returns:
         合并的 dict，失败的字段不包含
     """
-    results = await asyncio.gather(
+    tasks = [
         fetch_funding_rate(coin),
         fetch_fear_greed(),
         fetch_long_short_ratio(coin, timeframe),
         fetch_open_interest(coin),
-        return_exceptions=True,
-    )
+    ]
+    labels = ["funding_rate", "fear_greed", "long_short_ratio", "open_interest"]
+
+    # 算力数据只对 BTC 有意义
+    if "BTC" in coin:
+        tasks.append(fetch_hashrate())
+        labels.append("hashrate")
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
     market = {}
-    labels = ["funding_rate", "fear_greed", "long_short_ratio", "open_interest"]
 
     for label, result in zip(labels, results):
         if isinstance(result, Exception):
