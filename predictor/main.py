@@ -40,7 +40,10 @@ async def main():
         # 使用 polling 模式（长轮询，适合自用）
         await app.initialize()
         await app.start()
-        await app.updater.start_polling(drop_pending_updates=True)
+        await app.updater.start_polling(
+            drop_pending_updates=True,
+            allowed_updates=["message", "callback_query"],
+        )
         logger.info("Telegram Bot 已启动")
     else:
         logger.warning("TELEGRAM_BOT_TOKEN 未配置，Bot 不启动")
