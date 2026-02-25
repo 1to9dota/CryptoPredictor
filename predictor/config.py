@@ -17,8 +17,8 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-# 数据库路径
-DB_PATH = Path(__file__).resolve().parent.parent / "predictor.db"
+# 数据库路径（优先读环境变量，容器部署时指向挂载目录）
+DB_PATH = Path(os.getenv("DB_PATH", str(Path(__file__).resolve().parent.parent / "predictor.db")))
 
 # 预测配置
 COINS = ["BTCUSDT", "ETHUSDT"]

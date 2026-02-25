@@ -54,6 +54,30 @@ async def send_prediction(result: dict):
     ind = result["indicators"]
     macd_arrow = "\u25b2" if ind.get("macd_histogram", 0) > 0 else "\u25bc"
 
+    # 市场情绪摘要
+    market = ind.get("market_sentiment", {})
+    sentiment_lines = []
+    if "funding_rate" in market:
+        fr = market["funding_rate"]["funding_rate"]
+        sentiment_lines.append(f"费率 {fr:+.4%}")
+    if "fear_greed" in market:
+        fg = market["fear_greed"]
+        sentiment_lines.append(f"恐贪 {fg['value']}")
+    if "long_short_ratio" in market:
+        ls = market["long_short_ratio"]
+        sentiment_lines.append(f"多空比 {ls['ratio']:.2f}")
+    if "open_interest" in market:
+        oi = market["open_interest"]["open_interest"]
+        oi_b = oi / 1e9
+        sentiment_lines.append(f"持仓 {oi_b:.1f}B")
+    if "hashrate" in market:
+        hr = market["hashrate"]
+        hr_text = f"算力 {hr['hashrate_ehs']}EH"
+        if hr.get("change_7d_pct") is not None:
+            hr_text += f"({hr['change_7d_pct']:+.1f}%)"
+        sentiment_lines.append(hr_text)
+    sentiment_text = " | ".join(sentiment_lines) if sentiment_lines else "暂无"
+
     # 准确率
     stats = await get_accuracy_stats()
     acc_text = f"{stats['accuracy']}% ({stats['correct']}/{stats['total']})" if stats["total"] > 0 else "暂无数据"
@@ -77,6 +101,7 @@ async def send_prediction(result: dict):
         f"依据：{result['reasoning']}\n\n"
         f"当前价格：${result['price']:,.2f}\n"
         f"技术指标：RSI {ind.get('rsi', 0)} | MACD {macd_arrow} | BB %B {ind.get('bb_percent_b', 0)}%\n"
+        f"\U0001f4a1 市场情绪：{sentiment_text}\n"
         f"{last_text}\n"
         f"\U0001f4ca 近期准确率：{acc_text}"
     )

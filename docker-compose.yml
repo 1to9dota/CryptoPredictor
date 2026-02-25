@@ -1,0 +1,10 @@
+services:
+  crypto-predictor:
+    build: .
+    container_name: crypto-predictor
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DB_PATH=/app/data/predictor.db
