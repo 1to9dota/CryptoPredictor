@@ -4,6 +4,8 @@ services:
     container_name: crypto-predictor
     restart: unless-stopped
     env_file: .env
+    ports:
+      - "8089:8088"
     volumes:
       - ./data:/app/data
     environment:

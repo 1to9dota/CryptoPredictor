@@ -185,6 +185,60 @@ async def get_accuracy_stats() -> dict:
     }
 
 
+async def get_daily_stats() -> dict:
+    """获取今日预测统计（UTC 日期）"""
+    db = await get_db()
+
+    # 今日预测总数和准确率
+    cursor = await db.execute(
+        """SELECT COUNT(*) as total,
+                  SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct,
+                  SUM(CASE WHEN is_correct = 0 THEN 1 ELSE 0 END) as wrong,
+                  SUM(CASE WHEN validated_at IS NULL THEN 1 ELSE 0 END) as pending
+           FROM predictions
+           WHERE date(created_at) = date('now')"""
+    )
+    row = await cursor.fetchone()
+    total = row["total"] or 0
+    correct = row["correct"] or 0
+    wrong = row["wrong"] or 0
+    pending = row["pending"] or 0
+
+    # 今日分组统计
+    cursor = await db.execute(
+        """SELECT coin, timeframe, direction, confidence, reasoning,
+                  price_at_predict, price_at_validate, is_correct,
+                  created_at
+           FROM predictions
+           WHERE date(created_at) = date('now')
+           ORDER BY created_at"""
+    )
+    predictions = [dict(r) for r in await cursor.fetchall()]
+
+    # 找最佳和最差预测（已验证的）
+    validated = [p for p in predictions if p["is_correct"] is not None]
+    best = None
+    worst = None
+    for p in validated:
+        if p["price_at_validate"] and p["price_at_predict"]:
+            p["change_pct"] = (p["price_at_validate"] - p["price_at_predict"]) / p["price_at_predict"] * 100
+            if p["is_correct"] and (best is None or abs(p["change_pct"]) > abs(best["change_pct"])):
+                best = p
+            if not p["is_correct"] and (worst is None or abs(p["change_pct"]) > abs(worst["change_pct"])):
+                worst = p
+
+    return {
+        "total": total,
+        "correct": correct,
+        "wrong": wrong,
+        "pending": pending,
+        "accuracy": round(correct / (correct + wrong) * 100, 1) if (correct + wrong) > 0 else 0,
+        "best": best,
+        "worst": worst,
+        "predictions": predictions,
+    }
+
+
 async def save_learned_rules(rules: list[str], accuracy: float, analysis: str):
     """保存学习到的规则"""
     db = await get_db()
@@ -194,6 +248,19 @@ async def save_learned_rules(rules: list[str], accuracy: float, analysis: str):
         (json.dumps(rules, ensure_ascii=False), accuracy, analysis, _now())
     )
     await db.commit()
+
+
+async def get_latest_prediction_by_tf(coin: str, timeframe: str) -> dict | None:
+    """获取某币种某周期的最新预测（不要求已验证）"""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT * FROM predictions
+           WHERE coin = ? AND timeframe = ?
+           ORDER BY created_at DESC LIMIT 1""",
+        (coin, timeframe)
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
 
 
 async def get_latest_rules() -> list[str]:

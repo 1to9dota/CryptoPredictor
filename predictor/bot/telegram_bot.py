@@ -6,7 +6,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from predictor.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, COINS, TIMEFRAMES
 from predictor.storage.database import (
     get_accuracy_stats, get_recent_predictions, get_latest_rules,
-    get_last_prediction,
+    get_last_prediction, get_daily_stats,
 )
 from predictor.ai.predictor import predict
 from predictor.tracker.validator import validate_predictions
@@ -38,6 +38,22 @@ async def _send_text(text: str):
         await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text)
     except Exception as e:
         logger.error(f"Telegram 推送失败: {e}")
+
+
+async def send_alert(msg: str):
+    """发送告警消息到 Telegram（带 ⚠️ 前缀）"""
+    await _send_text(f"\u26a0\ufe0f 系统告警\n\n{msg}")
+
+
+async def send_price_alert(alert: dict):
+    """推送价格告警"""
+    text = (
+        f"{alert['emoji']} {alert['coin']} 价格告警\n\n"
+        f"类型：{alert['type']}\n"
+        f"详情：{alert['detail']}\n"
+        f"信号：{alert['signal']}"
+    )
+    await _send_text(text)
 
 
 async def send_prediction(result: dict):
@@ -130,6 +146,46 @@ async def send_validation_report(results: list[dict]):
         )
 
     lines.append(f"\n本轮：{correct_count}/{len(results)} 正确")
+    await _send_text("\n".join(lines))
+
+
+async def send_daily_report():
+    """推送每日报告"""
+    stats = await get_daily_stats()
+    if stats["total"] == 0:
+        return  # 今天没有预测，不发报告
+
+    # 准确率颜色标记
+    acc = stats["accuracy"]
+    acc_emoji = "\U0001f7e2" if acc >= 60 else "\U0001f7e1" if acc >= 50 else "\U0001f534"
+
+    lines = [
+        "\U0001f4cb 每日预测报告\n",
+        f"预测总数: {stats['total']}",
+        f"已验证: {stats['correct'] + stats['wrong']} ({acc_emoji} 准确率 {acc}%)",
+        f"  \u2705 正确: {stats['correct']}  \u274c 错误: {stats['wrong']}",
+        f"  \u23f3 待验证: {stats['pending']}",
+    ]
+
+    # 最佳预测
+    if stats["best"]:
+        b = stats["best"]
+        coin = "BTC" if "BTC" in b["coin"] else "ETH"
+        d = "\U0001f7e2涨" if b["direction"] == "up" else "\U0001f534跌"
+        lines.append(f"\n\U0001f3c6 最佳预测: {coin} {b['timeframe']} {d} ({b['change_pct']:+.2f}%)")
+
+    # 最差预测
+    if stats["worst"]:
+        w = stats["worst"]
+        coin = "BTC" if "BTC" in w["coin"] else "ETH"
+        d = "\U0001f7e2涨" if w["direction"] == "up" else "\U0001f534跌"
+        lines.append(f"\U0001f4a2 最差预测: {coin} {w['timeframe']} {d} ({w['change_pct']:+.2f}%)")
+
+    # 总体准确率
+    overall = await get_accuracy_stats()
+    if overall["total"] > 0:
+        lines.append(f"\n\U0001f4ca 累计准确率: {overall['accuracy']}% ({overall['correct']}/{overall['total']})")
+
     await _send_text("\n".join(lines))
 
 

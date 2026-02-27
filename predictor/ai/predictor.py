@@ -9,7 +9,8 @@ from predictor.data.fetcher import fetch_klines
 from predictor.data.indicators import calc_all
 from predictor.data.market_data import fetch_market_data
 from predictor.storage.database import (
-    save_prediction, get_latest_rules, get_recent_predictions
+    save_prediction, get_latest_rules, get_recent_predictions,
+    get_latest_prediction_by_tf,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,8 @@ def _build_market_section(market: dict) -> str:
 
 def _build_prompt(coin: str, timeframe: str, indicators: dict,
                   recent_klines: list[dict], rules: list[str],
-                  recent_perf: list[dict], market: dict | None = None) -> str:
+                  recent_perf: list[dict], market: dict | None = None,
+                  higher_tf: dict | None = None) -> str:
     """构建预测 prompt"""
     # 最近 10 根 K线的 OHLCV
     kline_summary = []
@@ -92,6 +94,17 @@ def _build_prompt(coin: str, timeframe: str, indicators: dict,
     # 市场情绪数据
     market_section = _build_market_section(market or {})
 
+    # 大周期参考（1H 预测时引入 4H 方向）
+    higher_tf_section = ""
+    if higher_tf:
+        h_dir = "涨" if higher_tf["direction"] == "up" else "跌"
+        higher_tf_section = f"""
+
+## 大周期参考（4H 最新预测）
+- 4H 方向: {h_dir}（置信度 {higher_tf['confidence']}/5）
+- 依据: {higher_tf.get('reasoning', '无')}
+- 提示: 大小周期方向一致时可适当提高置信度；方向矛盾时应降低置信度或更谨慎判断"""
+
     tf_label = "1小时" if timeframe == "1h" else "4小时"
     coin_name = "BTC" if "BTC" in coin else "ETH"
 
@@ -99,7 +112,7 @@ def _build_prompt(coin: str, timeframe: str, indicators: dict,
 
 ## 当前技术指标
 {json.dumps(indicators, indent=2, ensure_ascii=False)}
-{market_section}
+{market_section}{higher_tf_section}
 
 ## 最近价格走势（{timeframe} K线，从旧到新）
 {chr(10).join(kline_summary)}
@@ -151,8 +164,13 @@ async def predict(coin: str, timeframe: str) -> dict | None:
         if market:
             indicators["market_sentiment"] = market
 
+        # 3.5 多时间框架共振：1H 预测时引入最新 4H 预测作为上下文
+        higher_tf = None
+        if timeframe == "1h":
+            higher_tf = await get_latest_prediction_by_tf(coin, "4h")
+
         # 4. 构建 prompt 并调用 LLM
-        prompt = _build_prompt(coin, timeframe, indicators, klines, rules, recent, market)
+        prompt = _build_prompt(coin, timeframe, indicators, klines, rules, recent, market, higher_tf)
         client = _get_client()
         response = await client.chat.completions.create(
             model=OPENAI_MODEL,
